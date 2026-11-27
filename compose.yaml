@@ -1,0 +1,57 @@
+name: phoenix
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: phoenix
+      POSTGRES_USER: phoenix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./app/backend/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "phoenix", "-d", "phoenix"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks: [data]
+
+  redis:
+    image: redis:7-alpine
+    networks: [data]
+
+  phoenix-backend:
+    build: ./app/backend
+    image: phoenix-backend:0.1.0
+    environment:
+      STORE_MODE: postgres
+      DATABASE_URL: postgresql://phoenix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/phoenix
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+    networks: [frontend, data]
+
+  phoenix-frontend:
+    build: ./app/frontend
+    image: phoenix-frontend:0.1.0
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      phoenix-backend:
+        condition: service_healthy
+    networks: [frontend]
+
+networks:
+  frontend:
+  data:
+    internal: true
+
+volumes:
+  postgres-data:
